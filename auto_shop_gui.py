@@ -1,4 +1,5 @@
 import os
+import subprocess  
 import time
 import json
 import cv2
@@ -55,7 +56,12 @@ def save_config(cfg):
 
 # ================== 底层自动化函数 ==================
 def adb_cmd(device_id, cmd):
-    os.system(f"adb -s {device_id} {cmd}")
+    # 静默执行 adb 命令，彻底解决黑框狂闪的问题
+    full_cmd = f"adb -s {device_id} {cmd}"
+    if os.name == 'nt':  # 检测是否是 Windows 系统
+        subprocess.run(full_cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    else:  # 如果是 Mac 或 Linux（通常你只用在 Windows 上）
+        os.system(full_cmd)
 
 def tap(device_id, x, y):
     adb_cmd(device_id, f"shell input tap {int(x)} {int(y)}")
@@ -66,8 +72,16 @@ def swipe_up(device_id, w, h):
     adb_cmd(device_id, f"shell input swipe {w//2} {start} {w//2} {end} 600")
 
 def screencap(device_id, path="screen.png"):
+    # 1. 静默截图到模拟器内部
     adb_cmd(device_id, "shell screencap /sdcard/temp.png")
-    os.system(f"adb -s {device_id} pull /sdcard/temp.png {path} >nul 2>nul")
+    
+    # 2. ★★★ 修改这里：把 os.system 换成静默的 subprocess ★★★
+    full_cmd = f"adb -s {device_id} pull /sdcard/temp.png {path}"
+    if os.name == 'nt':
+        subprocess.run(full_cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    else:
+        os.system(full_cmd)
+        
     return path
 
 def get_region_brightness(gray_img, x, y, w, h):
@@ -147,7 +161,8 @@ def auto_shop_worker(params):
             if btn: tap(device_id, btn[0], btn[1])
             else: tap(device_id, ax + 200, ay)
 
-            time.sleep(1.8)
+            # ★★★ 提速1：从 1.8 秒减少到 1.2 秒，弹窗足够出现 ★★★
+            time.sleep(1.2)
             screencap(device_id, "popup.png")
             popup = cv2.imread("popup.png", 0)
             if popup is not None:
@@ -192,7 +207,8 @@ def auto_shop_worker(params):
 
         b1 = scan_screen("第一屏")
         if b1:
-            time.sleep(1.5)
+            # ★★★ 提速2：购买后的等待冷却从 1.5 秒减少到 1.0 秒 ★★★
+            time.sleep(1.0)
             log_queue.put("⏳ 等待界面恢复...")
 
         log_queue.put("⬇️ 下滑查看下方...")
@@ -201,11 +217,13 @@ def auto_shop_worker(params):
         if tmp_img is not None:
             sh, sw = tmp_img.shape[:2]
             swipe_up(device_id, sw, sh)
-            time.sleep(1.0)
+            # ★★★ 提速3：下滑后从 1.0 秒减少到 0.7 秒 ★★★
+            time.sleep(0.7)
 
         b2 = scan_screen("第二屏")
         if b2:
-            time.sleep(1.5)
+            # ★★★ 提速2：购买后的等待冷却从 1.5 秒减少到 1.0 秒 ★★★
+            time.sleep(1.0)
             log_queue.put("⏳ 等待界面恢复...")
 
         log_queue.put("🔄 两屏扫完，执行刷新")
@@ -224,7 +242,8 @@ def auto_shop_worker(params):
             tap(device_id, 1080*0.58, 2400*0.63 - 10)
             stats["diamond"] += 3
 
-        time.sleep(2.5)
+        # ★★★ 注意：刷新后的 2.0 秒等待我没改，这是为了保证游戏商品完全重置 ★★★
+        time.sleep(2.0)
         log_queue.put(("STATS_UPDATE", stats["gold"], stats["diamond"], stats["current_round"], stats["bookmark_count"], stats["mystic_count"]))
 
     if stop_flag:
@@ -233,6 +252,7 @@ def auto_shop_worker(params):
         log_queue.put(f"\n🏁 圆满完成 {stats['max_round']} 次刷新！")
     log_queue.put(("STATS_UPDATE", stats["gold"], stats["diamond"], stats["current_round"], stats["bookmark_count"], stats["mystic_count"]))
     log_queue.put("===== 结束 =====")
+
 
 # ================== GUI 界面 ==================
 def update_log_and_stats(text_widget, gold_label, dia_label, round_label, bookmark_label, mystic_label, bm_rate_label, my_rate_label):
@@ -263,10 +283,10 @@ def start_script(entries, log_text, gold_label, dia_label, round_label, bookmark
     try:
         params["device_id"] = entries["device_id"].get().strip()
         params["max_refresh"] = int(entries["max_refresh"].get())
-        params["bookmark_template"] = "bookmark.png"
-        params["mystic_template"] = "mystic.png"
-        params["buy_btn_template"] = "buy_btn.png"
-        params["confirm_btn_template"] = "confirm_btn.png"
+        params["bookmark_template"] = "Feature_screenshot/bookmark.png"
+        params["mystic_template"] = "Feature_screenshot/mystic.png"
+        params["buy_btn_template"] = "Feature_screenshot/buy_btn.png"
+        params["confirm_btn_template"] = "Feature_screenshot/confirm_btn.png"
     except Exception as e:
         messagebox.showerror("错误", f"参数格式错误: {e}")
         return

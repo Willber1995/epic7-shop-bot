@@ -5,3 +5,6 @@ popup.png
 *.jpeg
 __pycache__/
 *.pyc
+dist/
+build/
+*.spec
