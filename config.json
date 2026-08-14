@@ -1,0 +1,8 @@
+{
+  "device_id": "127.0.0.1:5557",
+  "max_refresh": 333,
+  "bookmark_template": "bookmark.png",
+  "mystic_template": "mystic.png",
+  "buy_btn_template": "buy_btn.png",
+  "confirm_btn_template": "confirm_btn.png"
+}
