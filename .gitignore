@@ -1,0 +1,7 @@
+config.json
+screen.png
+popup.png
+*.jpg
+*.jpeg
+__pycache__/
+*.pyc
