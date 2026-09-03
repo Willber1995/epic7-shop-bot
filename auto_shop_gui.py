@@ -1,5 +1,5 @@
 import os
-import subprocess  
+import subprocess
 import time
 import json
 import cv2
@@ -14,7 +14,7 @@ os.chdir(script_dir)
 
 CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
-    "device_id": "127.0.0.1:5557",
+    "device_id": "emulator-5556",
     "bookmark_template": "Feature_screenshot/bookmark.png",
     "mystic_template": "Feature_screenshot/mystic.png",
     "buy_btn_template": "Feature_screenshot/buy_btn.png",
@@ -56,12 +56,16 @@ def save_config(cfg):
 
 # ================== 底层自动化函数 ==================
 def adb_cmd(device_id, cmd):
-    # 静默执行 adb 命令，彻底解决黑框狂闪的问题
     full_cmd = f"adb -s {device_id} {cmd}"
-    if os.name == 'nt':  # 检测是否是 Windows 系统
-        subprocess.run(full_cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-    else:  # 如果是 Mac 或 Linux（通常你只用在 Windows 上）
+    if os.name == 'nt':
+        # 抓取报错信息，防止静默失败导致假运行
+        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        if result.returncode != 0:
+            print(f"⚠️【ADB 报错】设备 {device_id} 执行失败！\n命令：{cmd}\n报错：{result.stderr.strip()}")
+            return False
+    else:
         os.system(full_cmd)
+    return True
 
 def tap(device_id, x, y):
     adb_cmd(device_id, f"shell input tap {int(x)} {int(y)}")
@@ -72,17 +76,30 @@ def swipe_up(device_id, w, h):
     adb_cmd(device_id, f"shell input swipe {w//2} {start} {w//2} {end} 600")
 
 def screencap(device_id, path="screen.png"):
-    # 1. 静默截图到模拟器内部
-    adb_cmd(device_id, "shell screencap /sdcard/temp.png")
-    
-    # 2. ★★★ 修改这里：把 os.system 换成静默的 subprocess ★★★
+    # 先删旧图，防止读到残留文件
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except:
+            pass
+
+    if not adb_cmd(device_id, "shell screencap /sdcard/temp.png"):
+        return None
+
     full_cmd = f"adb -s {device_id} pull /sdcard/temp.png {path}"
     if os.name == 'nt':
-        subprocess.run(full_cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        if result.returncode != 0:
+            print(f"⚠️【ADB 报错】拉取截图失败！\n报错：{result.stderr.strip()}")
+            return None
     else:
         os.system(full_cmd)
-        
-    return path
+
+    if os.path.exists(path):
+        return path
+    else:
+        print("⚠️ 截图文件未生成！")
+        return None
 
 def get_region_brightness(gray_img, x, y, w, h):
     x1 = max(0, int(x - w/2)); y1 = max(0, int(y - h/2))
@@ -135,6 +152,13 @@ def auto_shop_worker(params):
 
     log_queue.put("===== 自动化商店采购启动 =====")
 
+    # 启动前检测ADB连接状态，连不上直接退出，不跑假循环
+    check = subprocess.run("adb devices", shell=True, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    if device_id not in check.stdout:
+        log_queue.put(f"❌ 未检测到设备 {device_id}！请确保模拟器已开启，ADB连接正常。")
+        log_queue.put("===== 结束 =====")
+        return
+
     while stats["current_round"] < stats["max_round"] and not stop_flag:
         stats["current_round"] += 1
         log_queue.put(f"\n---------- 第 {stats['current_round']} 轮 ----------")
@@ -161,7 +185,6 @@ def auto_shop_worker(params):
             if btn: tap(device_id, btn[0], btn[1])
             else: tap(device_id, ax + 200, ay)
 
-            # ★★★ 提速1：从 1.8 秒减少到 1.2 秒，弹窗足够出现 ★★★
             time.sleep(1.2)
             screencap(device_id, "popup.png")
             popup = cv2.imread("popup.png", 0)
@@ -187,8 +210,9 @@ def auto_shop_worker(params):
             return True
 
         def scan_screen(screen_name):
-            screencap(device_id)
-            img = cv2.imread("screen.png", 0)
+            path = screencap(device_id)
+            if path is None: return False
+            img = cv2.imread(path, 0)
             if img is None: return False
             h, w = img.shape[:2]
             
@@ -207,42 +231,40 @@ def auto_shop_worker(params):
 
         b1 = scan_screen("第一屏")
         if b1:
-            # ★★★ 提速2：购买后的等待冷却从 1.5 秒减少到 1.0 秒 ★★★
             time.sleep(1.0)
             log_queue.put("⏳ 等待界面恢复...")
 
         log_queue.put("⬇️ 下滑查看下方...")
-        screencap(device_id)
-        tmp_img = cv2.imread("screen.png", 0)
-        if tmp_img is not None:
-            sh, sw = tmp_img.shape[:2]
-            swipe_up(device_id, sw, sh)
-            # ★★★ 提速3：下滑后从 1.0 秒减少到 0.7 秒 ★★★
-            time.sleep(0.7)
+        tmp_path = screencap(device_id)
+        if tmp_path is not None:
+            tmp_img = cv2.imread(tmp_path, 0)
+            if tmp_img is not None:
+                sh, sw = tmp_img.shape[:2]
+                swipe_up(device_id, sw, sh)
+                time.sleep(0.7)
 
         b2 = scan_screen("第二屏")
         if b2:
-            # ★★★ 提速2：购买后的等待冷却从 1.5 秒减少到 1.0 秒 ★★★
             time.sleep(1.0)
             log_queue.put("⏳ 等待界面恢复...")
 
         log_queue.put("🔄 两屏扫完，执行刷新")
-        screencap(device_id)
-        img_r = cv2.imread("screen.png", 0)
-        if img_r is not None:
-            h_r, w_r = img_r.shape[:2]
-            tap(device_id, w_r * 0.22, h_r * 0.92)
-            time.sleep(1)
-            tap(device_id, w_r * 0.58, h_r * 0.63 - 10)
-            stats["diamond"] += 3
-            log_queue.put(f"💎 刷新成功，已消耗 3 钻石")
-        else:
-            tap(device_id, 1080*0.22, 2400*0.92)
-            time.sleep(1)
-            tap(device_id, 1080*0.58, 2400*0.63 - 10)
-            stats["diamond"] += 3
+        img_path = screencap(device_id)
+        if img_path is not None:
+            img_r = cv2.imread(img_path, 0)
+            if img_r is not None:
+                h_r, w_r = img_r.shape[:2]
+                tap(device_id, w_r * 0.22, h_r * 0.92)
+                time.sleep(1)
+                tap(device_id, w_r * 0.58, h_r * 0.63 - 10)
+                stats["diamond"] += 3
+                log_queue.put(f"💎 刷新成功，已消耗 3 钻石")
+            else:
+                tap(device_id, 1080*0.22, 2400*0.92)
+                time.sleep(1)
+                tap(device_id, 1080*0.58, 2400*0.63 - 10)
+                stats["diamond"] += 3
 
-        # ★★★ 注意：刷新后的 2.0 秒等待我没改，这是为了保证游戏商品完全重置 ★★★
         time.sleep(2.0)
         log_queue.put(("STATS_UPDATE", stats["gold"], stats["diamond"], stats["current_round"], stats["bookmark_count"], stats["mystic_count"]))
 
@@ -265,11 +287,8 @@ def update_log_and_stats(text_widget, gold_label, dia_label, round_label, bookma
             round_label.config(text=f"{cur_round} / {stats['max_round']}")
             bookmark_label.config(text=f"{bm_count}")
             mystic_label.config(text=f"{my_count}")
-            
-            # ★★★ 独立计算两种购买率 ★★★
             bm_rate = (bm_count / max(1, cur_round)) * 100
             my_rate = (my_count / max(1, cur_round)) * 100
-            
             bm_rate_label.config(text=f"{int(bm_rate)}%")
             my_rate_label.config(text=f"{int(my_rate)}%")
         else:
@@ -295,9 +314,7 @@ def start_script(entries, log_text, gold_label, dia_label, round_label, bookmark
     stop_flag = False
     btn_start.config(state=tk.DISABLED)
     btn_stop.config(state=tk.NORMAL)
-    
     log_text.delete(1.0, tk.END)
-    
     t = threading.Thread(target=auto_shop_worker, args=(params,), daemon=True)
     t.start()
 
@@ -316,7 +333,6 @@ def build_gui():
     config = load_config()
     entries = {}
 
-    # ===== 1. 设置区 =====
     frame_setting = ttk.LabelFrame(root, text="基础设置")
     frame_setting.pack(fill=tk.X, padx=10, pady=5)
     
@@ -339,14 +355,12 @@ def build_gui():
     entries["max_refresh"].pack(side=tk.LEFT, padx=5)
     ttk.Label(row2, text="(跑满自动停止)", foreground="#888").pack(side=tk.LEFT, padx=5)
 
-    # ===== 2. 统计面板 =====
     frame_stats = ttk.LabelFrame(root, text="实时统计")
     frame_stats.pack(fill=tk.X, padx=10, pady=5)
 
     stats_frame = ttk.Frame(frame_stats)
     stats_frame.pack(pady=8)
     
-    # 第1行：消耗类
     row_stats1 = ttk.Frame(stats_frame)
     row_stats1.pack(fill=tk.X, pady=(0, 6))
     ttk.Label(row_stats1, text="消耗金币:").pack(side=tk.LEFT, padx=10)
@@ -361,11 +375,9 @@ def build_gui():
     round_label = ttk.Label(row_stats1, text=f"0 / {config['max_refresh']}", font=("Arial", 12, "bold"))
     round_label.pack(side=tk.LEFT, padx=5)
 
-    # 第2行：书签与奖牌获取概率（独立计算）
     row_stats2 = ttk.Frame(stats_frame)
     row_stats2.pack(fill=tk.X)
     
-    # 书签统计块
     bm_frame = ttk.Frame(row_stats2)
     bm_frame.pack(side=tk.LEFT, padx=10)
     ttk.Label(bm_frame, text="📕 誓约书签:").pack(side=tk.LEFT)
@@ -376,7 +388,6 @@ def build_gui():
     bm_rate_label.pack(side=tk.LEFT)
     ttk.Label(bm_frame, text=")").pack(side=tk.LEFT)
 
-    # 奖牌统计块
     my_frame = ttk.Frame(row_stats2)
     my_frame.pack(side=tk.LEFT, padx=30)
     ttk.Label(my_frame, text="📘 神秘奖牌:").pack(side=tk.LEFT)
@@ -387,13 +398,11 @@ def build_gui():
     my_rate_label.pack(side=tk.LEFT)
     ttk.Label(my_frame, text=")").pack(side=tk.LEFT)
 
-    # ===== 3. 日志区 =====
     frame_log = ttk.LabelFrame(root, text="运行日志")
     frame_log.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     log_text = scrolledtext.ScrolledText(frame_log, wrap=tk.WORD, font=("Microsoft YaHei", 9))
     log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-    # ===== 4. 按钮区 =====
     frame_btn = ttk.Frame(root)
     frame_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
 
