@@ -20,7 +20,7 @@
 - [tesseract](https://github.com/tesseract-ocr/tesseract)（用来认金币数字的）
 - adb
 
-游戏那边用模拟器或者手机开着，adb 连上（默认连 `127.0.0.1:5555`），然后：
+游戏那边用模拟器或者手机开着，adb 连上（默认连 `127.0.0.1:5555`），分辨率用1280*720，然后：
 
 ```bash
 python3 run_machine.py
@@ -58,4 +58,5 @@ python3 run_machine.py
 
 ## 免责
 
-自己刷着玩的小工具，用之前想清楚，风险自负。
+自己刷过一段时间目前没发现bug，
+deepseek-v4.1-flash 帮忙写的，环境不同可能出现的bug概不负责。风险自负。
