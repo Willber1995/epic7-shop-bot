@@ -4,7 +4,8 @@
 
 ![监控页面](docs/monitor.png)
 
-> 左边是网页监控，右边是游戏本体。
+> 网页监控+游戏本体。
+> 环境 mac系统+蓝叠模拟器 （淘宝的脚本大多不做mac的安卓模拟器，原生mac更麻烦，所以自己改了一个）
 
 ## 它干嘛的
 
@@ -14,7 +15,7 @@
 
 ## 怎么跑
 
-机器上得先有这几样：
+机器上得先有这几样：（找个agent帮你一键装吧）
 
 - Python 3，装三个库：`pip install opencv-python numpy pytesseract`
 - [tesseract](https://github.com/tesseract-ocr/tesseract)（用来认金币数字的）
