@@ -8,3 +8,9 @@ __pycache__/
 dist/
 build/
 *.spec
+
+# 素材模板统一放在 Feature_screenshot/，根目录下的图片都是脚本截图运行时落盘
+/*.png
+# 运行时状态快照与日志
+state.js
+*.log

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>E7 秘密商店状态机监控</title>
+<style>
+  :root { --bg:#0f1218; --card:#171c26; --ink:#d7dde8; --dim:#7a8499; --ok:#3dd68c; --warn:#f5b942; --err:#ff6b6b; --buy:#ffd166; --acc:#4d94ff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; padding:24px; max-width:960px; margin:0 auto; }
+  h1 { font-size:18px; font-weight:600; margin-bottom:16px; color:#fff; }
+  .head { display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  #statePill { display:inline-block; padding:6px 16px; border-radius:999px; font-weight:700; font-size:15px; letter-spacing:1px; background:#2a3347; color:#9fb4d8; }
+  #statePill.ok { background:#123526; color:var(--ok); }
+  #statePill.warn { background:#3a2e12; color:var(--warn); }
+  #statePill.err { background:#3a1518; color:var(--err); }
+  #statePill.buy { background:#3a3212; color:var(--buy); }
+  .dot { width:9px; height:9px; border-radius:50%; background:#666; }
+  .dot.on { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  #svc { font-size:12px; color:var(--dim); }
+  #svc.bad { color:var(--err); }
+  #svc.good { color:var(--ok); }
+  .ctrl { background:var(--card); border:1px solid #232a38; border-radius:10px; padding:14px 16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .ctrl label { color:var(--dim); font-size:13px; }
+  .ctrl input[type=number] { width:72px; background:#0c1017; border:1px solid #2a3347; color:#fff; border-radius:6px; padding:7px 10px; font-size:15px; text-align:center; }
+  button { border:0; border-radius:8px; padding:9px 20px; font-size:14px; font-weight:600; cursor:pointer; color:#fff; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  #btnStart { background:#1f7a4d; }
+  #btnPause { background:#8a6d1f; }
+  #btnStop { background:#8a2b33; }
+  button:hover:not(:disabled) { filter:brightness(1.15); }
+  .states { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .chip { padding:4px 10px; border-radius:6px; background:#1a2030; color:#5a6478; font-size:12px; font-family:ui-monospace,monospace; }
+  .chip.cur { background:#2a4a6e; color:#fff; font-weight:700; }
+  .chip.done { background:#1a3328; color:var(--ok); }
+  .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid #232a38; border-radius:10px; padding:12px 16px; min-width:130px; flex:1; }
+  .card .k { color:var(--dim); font-size:12px; margin-bottom:4px; }
+  .card .v { font-size:20px; font-weight:600; color:#fff; }
+  #log { background:var(--card); border:1px solid #232a38; border-radius:10px; height:400px; overflow-y:auto; padding:10px 14px; font:12.5px/1.7 ui-monospace,Menlo,Consolas,monospace; }
+  .line { white-space:pre-wrap; border-bottom:1px solid #1e2430; padding:2px 0; }
+  .line .t { color:#5a6478; margin-right:8px; }
+  .line .s { margin-right:8px; color:#8b9bb8; }
+  .line.ok .m { color:var(--ok); }
+  .line.warn .m { color:var(--warn); }
+  .line.err .m { color:var(--err); }
+  .line.buy .m { color:var(--buy); font-weight:600; }
+  .line.info .m { color:var(--ink); }
+  .tip { font-size:12px; color:var(--dim); margin-bottom:14px; }
+</style>
+</head>
+<body>
+<h1>第七史诗 · 秘密商店自动助手 — 状态机监控</h1>
+
+<div class="head">
+  <span id="dot" class="dot"></span>
+  <span id="statePill">等待数据…</span>
+  <span id="runTxt" style="color:var(--dim);font-size:13px"></span>
+  <span id="svc" class="bad">控制服务: 检测中…</span>
+</div>
+
+<div class="ctrl">
+  <label for="rounds">刷新轮次</label>
+  <input type="number" id="rounds" min="1" max="333" value="5">
+  <button id="btnStart">▶ 开始</button>
+  <button id="btnPause" disabled>⏸ 暂停</button>
+  <button id="btnStop" disabled>⏹ 停止</button>
+  <span class="tip" style="margin:0">启动时识别一次金币，购买本地扣减；仅余额不足 50 万时复核并停止</span>
+</div>
+
+<div class="states" id="flow"></div>
+
+<div class="row">
+  <div class="card"><div class="k">轮次</div><div class="v" id="round">–</div></div>
+  <div class="card"><div class="k">当前金币</div><div class="v" id="goldLeft" style="color:#f0c14b">–</div></div>
+  <div class="card"><div class="k">金币消耗</div><div class="v" id="gold" style="color:#f0c14b">0</div></div>
+  <div class="card"><div class="k">钻石消耗</div><div class="v" id="dia" style="color:#6eb6ff">0</div></div>
+  <div class="card"><div class="k">购买明细</div><div class="v" id="bought" style="font-size:14px">无</div></div>
+</div>
+
+<div id="log"></div>
+
+<script>
+const API = "http://127.0.0.1:8787";
+const FLOW = ["IDLE","BOOT","GOLD_CHECK","LOBBY","ENTER_SHOP","SCAN1","BUY_TAP","BUY_CONFIRM","SWIPE","REFRESH_OPEN","REFRESH_DIALOG","REFRESH_CONFIRM","REFRESH_WAIT","ROUND_DONE","PAUSED","GOLD_BLOCK","DONE","ERROR"];
+const LEVEL = {info:"info",ok:"ok",warn:"warn",err:"err",buy:"buy"};
+const PILL = {BOOT:"",SCAN1:"",SWIPE:"",REFRESH_OPEN:"",REFRESH_DIALOG:"",REFRESH_WAIT:"",ROUND_DONE:"",IDLE:"",LOBBY:"",
+  ENTER_SHOP:"ok",
+  BUY_TAP:"buy",BUY_CONFIRM:"buy",REFRESH_CONFIRM:"buy",GOLD_CHECK:"ok",
+  DONE:"ok",PAUSED:"warn",GOLD_BLOCK:"err",ERROR:"err"};
+let lastLen = -1, paused = false, apiUp = null;
+
+function esc(t){return t.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+
+function render(){
+  const s = window.E7_STATE;
+  if (!s) return;
+  const pill = document.getElementById("statePill");
+  pill.textContent = s.state + (s.paused ? " (已暂停)" : "");
+  pill.className = PILL[s.state] ?? "";
+  document.getElementById("dot").className = "dot " + (s.running ? "on" : "");
+  document.getElementById("runTxt").textContent = s.running ? (s.paused ? "已暂停" : "运行中") : "空闲";
+  document.getElementById("round").textContent = (s.round||0) + " / " + (s.max_round||"–");
+  document.getElementById("goldLeft").textContent = s.stats.gold_left == null ? "待检测" : Number(s.stats.gold_left).toLocaleString();
+  if (s.stats.gold_left != null && s.stats.gold_left < 500000)
+    document.getElementById("goldLeft").style.color = "var(--err)";
+  else
+    document.getElementById("goldLeft").style.color = "#f0c14b";
+  document.getElementById("gold").textContent = (s.stats.gold||0).toLocaleString();
+  document.getElementById("dia").textContent = (s.stats.diamond||0).toLocaleString();
+  const b = Object.entries(s.stats.bought||{}).map(([k,v])=>k+"×"+v).join("  ");
+  document.getElementById("bought").textContent = b || "无";
+
+  const seen = new Set(s.log.map(x=>x.state));
+  document.getElementById("flow").innerHTML = FLOW.map(st=>{
+    let cls = "chip";
+    if (st === s.state) cls += " cur";
+    else if (seen.has(st) && st !== "ERROR" && st !== "GOLD_BLOCK") cls += " done";
+    if ((st === "ERROR" || st === "GOLD_BLOCK") && seen.has(st)) cls = "chip cur";
+    return `<span class="${cls}">${st}</span>`;
+  }).join("");
+
+  const log = document.getElementById("log");
+  if (s.log.length !== lastLen){
+    log.innerHTML = s.log.map(e =>
+      `<div class="line ${LEVEL[e.level]||"info"}"><span class="t">${e.t}</span><span class="s">[${e.state}]</span><span class="m">${esc(e.msg)}</span></div>`
+    ).join("");
+    lastLen = s.log.length;
+    log.scrollTop = log.scrollHeight;
+  }
+
+  paused = !!s.paused;
+  updateBtns(s.running);
+}
+
+function updateBtns(running){
+  document.getElementById("btnStart").disabled = running;
+  document.getElementById("btnPause").disabled = !running;
+  document.getElementById("btnStop").disabled = !running;
+  document.getElementById("btnPause").textContent = paused ? "⏵ 继续" : "⏸ 暂停";
+  document.getElementById("rounds").disabled = running;
+}
+
+async function api(path){
+  try{
+    const r = await fetch(API + path, {mode:"cors"});
+    setSvc(true);
+    return await r.json().catch(()=>({ok:true}));
+  }catch(e){
+    setSvc(false);
+    return null;
+  }
+}
+function setSvc(ok){
+  const el = document.getElementById("svc");
+  if (apiUp === ok) return;
+  apiUp = ok;
+  el.textContent = ok ? "控制服务: 已连接 :" + API.split(":").pop() : "控制服务: 离线 (请先运行 python3 run_machine.py)";
+  el.className = ok ? "good" : "bad";
+}
+
+document.getElementById("btnStart").onclick = () => {
+  const n = Math.max(1, Math.min(333, parseInt(document.getElementById("rounds").value)||5));
+  api("/api/start?rounds=" + n);
+};
+document.getElementById("btnPause").onclick = () => {
+  api(paused ? "/api/resume" : "/api/pause");
+};
+document.getElementById("btnStop").onclick = () => api("/api/stop");
+
+function poll(){
+  const s = document.createElement("script");
+  s.src = "state.js?_" + Date.now();
+  s.onload = () => { s.remove(); render(); };
+  s.onerror = () => { s.remove(); };
+  document.body.appendChild(s);
+}
+poll(); setInterval(poll, 900);
+api("/api/ping"); setInterval(() => api("/api/ping"), 3000);
+</script>
+</body>
+</html>
