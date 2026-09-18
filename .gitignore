@@ -9,8 +9,14 @@ dist/
 build/
 *.spec
 
-# 素材模板统一放在 Feature_screenshot/，根目录下的图片都是脚本截图运行时落盘
-/*.png
+# 截图只保留 Feature_screenshot/(识别模板) 和 docs/(README 配图)，
+# 其余地方的 png 都是脚本运行时落盘的截图，不进库
+*.png
+!Feature_screenshot/*.png
+!docs/*.png
+
 # 运行时状态快照与日志
 state.js
 *.log
+
+.DS_Store
